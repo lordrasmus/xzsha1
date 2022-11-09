@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <unistd.h>
+
 #include <lzma.h>
 
 
@@ -90,7 +92,7 @@ init_decoder(lzma_stream *strm)
 
 
 static bool
-decompress(lzma_stream *strm, const char *inname, FILE *infile, EVP_MD_CTX* mdctx_db )
+decompress(lzma_stream *strm, const char *inname, long size, FILE *infile, EVP_MD_CTX* mdctx_db )
 {
 	// When LZMA_CONCATENATED flag was used when initializing the decoder,
 	// we need to tell lzma_code() when there will be no more input.
@@ -106,6 +108,8 @@ decompress(lzma_stream *strm, const char *inname, FILE *infile, EVP_MD_CTX* mdct
 
 	uint8_t inbuf[BUFSIZ];
 	uint8_t outbuf[BUFSIZ];
+    
+    long cur_size = 0;
 
 	strm->next_in = NULL;
 	strm->avail_in = 0;
@@ -140,7 +144,15 @@ decompress(lzma_stream *strm, const char *inname, FILE *infile, EVP_MD_CTX* mdct
 
             EVP_DigestUpdate(mdctx_db, outbuf, write_size );
 
+            cur_size += write_size;
+            
+            double proz = ( (double)cur_size / (double)size ) * 100;
+            
+            //printf("\33[2K\rcur_size : %ld", cur_size );
+            printf("\33[2K\rprogress : %0.2f %%", proz );
 			
+            fflush(stdout);
+            //sleep(1);
 
 			strm->next_out = outbuf;
 			strm->avail_out = sizeof(outbuf);
@@ -245,14 +257,20 @@ int main( int argc, char** argv){
     
     FILE *infile = fopen(argv[1], "rb");
     
-    if (infile == NULL) {
+     if (infile == NULL) {
                fprintf(stderr, "%s: Error opening the "
                        "input file: %s\n",
                        argv[1], strerror(errno));
                success = false;
     }
     
-    success &= decompress(&strm, argv[1], infile, mdctx_db );
+    fseek( infile, 0, SEEK_END );
+    long  size=ftell (infile);
+    fseek( infile, 0, SEEK_SET );
+    
+    printf("size : %ld\n", size );
+    
+    success &= decompress(&strm, argv[1], size, infile, mdctx_db );
     fclose(infile);
   
    
@@ -262,6 +280,8 @@ int main( int argc, char** argv){
     
 	EVP_DigestFinal_ex(mdctx_db, sha1, &sha1_len);
 	EVP_MD_CTX_destroy(mdctx_db);
+    
+     printf("\33[2K\rsha1sum ");
     
     for( int i = 0 ; i < SHA_DIGEST_LENGTH ; i++ ){
         printf("%02x", sha1[i] );
